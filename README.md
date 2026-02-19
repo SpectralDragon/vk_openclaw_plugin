@@ -8,6 +8,7 @@ VK Callback API plugin for OpenClaw.
 - Attachment parsing (photos/docs/voice/stickers)
 - Allow list controls
 - Callback secret authorization
+- Extra events: message_edit, message_reply, message_allow, message_deny
 
 ## Install
 ```bash

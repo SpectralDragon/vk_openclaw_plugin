@@ -71,13 +71,40 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
-  if (body.type !== "message_new") {
+  if (body.type === "message_allow" || body.type === "message_deny") {
+    const core = getVkRuntime();
+    const cfg = await loadConfigFromRuntime(core);
+    const runtime = createRuntimeFromCore(core);
+    const object = body.object || {};
+    const userId = Number(object.user_id || object.userId || object.user);
+    const eventLabel = body.type === "message_allow" ? "VK user allowed messages" : "VK user denied messages";
+    if (userId) {
+      const route = core.channel.routing.resolveAgentRoute({
+        cfg,
+        channel: "vk",
+        peer: { kind: "dm", id: String(userId) },
+      });
+      core.system.enqueueSystemEvent(`${eventLabel}: ${userId}`, {
+        sessionKey: route.sessionKey,
+        contextKey: `vk:${body.type}:${userId}:${Date.now()}`,
+      });
+    } else {
+      runtime.warn?.(`[VK] ${eventLabel} but user_id missing`);
+    }
+
     res.writeHead(200);
     res.end("ok");
     return;
   }
 
-  const message = body.object?.message;
+  const supportedTypes = new Set(["message_new", "message_edit", "message_reply"]);
+  if (!supportedTypes.has(body.type)) {
+    res.writeHead(200);
+    res.end("ok");
+    return;
+  }
+
+  const message = body.object?.message || body.object?.reply_message || body.object?.reply;
   if (!message) {
     res.writeHead(200);
     res.end("ok");
@@ -96,7 +123,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   const attachments = parseAttachments(message.attachments || []);
   const attachmentText = attachments.summary;
-  const content = [message.text, attachmentText].filter(Boolean).join("\n").trim();
+  const eventPrefix = body.type === "message_edit"
+    ? "[edited] "
+    : body.type === "message_reply"
+      ? "[reply] "
+      : "";
+  const content = [eventPrefix + (message.text || ""), attachmentText].filter(Boolean).join("\n").trim();
 
   if (!content) {
     res.writeHead(200);
