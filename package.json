@@ -1,0 +1,57 @@
+{
+  "name": "vk-openclaw-plugin",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "VK integration plugin for OpenClaw",
+  "author": "Vladislav Prusakov",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/VladislavPrusakov/vk-openclaw-plugin"
+  },
+  "keywords": [
+    "vk",
+    "vk-bot",
+    "openclaw",
+    "ai-agent",
+    "chatbot",
+    "automation"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "channel": {
+      "id": "vk",
+      "label": "VK",
+      "selectionLabel": "VK",
+      "detailLabel": "VK Bot",
+      "docsPath": "/channels/vk",
+      "docsLabel": "vk",
+      "blurb": "VK Callback API integration for OpenClaw.",
+      "aliases": [
+        "vkontakte",
+        "вк",
+        "vk.com"
+      ],
+      "order": 60
+    },
+    "install": {
+      "npmSpec": "vk-openclaw-plugin",
+      "localPath": "extensions/vk",
+      "defaultChoice": "npm",
+      "pluginId": "vk-openclaw-plugin"
+    }
+  },
+  "dependencies": {
+    "node-vk-bot-api": "^4.5.0",
+    "zod": "^3.22.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.1.26"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.0",
+    "typescript": "^5.9.3"
+  }
+}

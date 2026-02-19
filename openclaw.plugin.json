@@ -1,0 +1,14 @@
+{
+  "id": "vk-openclaw-plugin",
+  "name": "VK Integration",
+  "description": "Connect OpenClaw AI agent to VK via Callback API",
+  "version": "0.1.0",
+  "channels": [
+    "vk-openclaw-plugin"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
