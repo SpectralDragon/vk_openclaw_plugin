@@ -29,14 +29,14 @@ export const vkPlugin: ChannelPlugin<VkResolvedAccount> = {
     detailLabel: "VK Bot",
     docsPath: "/channels/vk",
     docsLabel: "vk",
-    blurb: "VK Callback API integration for OpenClaw.",
+    blurb: "VK Long Polling API integration for OpenClaw.",
     systemImage: "message",
     aliases: ["vkontakte", "вк", "vk.com"],
   },
 
   capabilities: {
     chatTypes: ["direct", "group"],
-    polls: false,
+    polls: true,
     threads: false,
     media: true,
     reactions: false,
@@ -49,7 +49,7 @@ export const vkPlugin: ChannelPlugin<VkResolvedAccount> = {
     resolveAccount: (_cfg, accountId) => {
       const config = createAccountFromEnv();
 
-      if (!config?.accessToken || !config?.groupId || !config?.confirmationToken) {
+      if (!config?.accessToken || !config?.groupId) {
         return {
           accountId: accountId?.trim() || DEFAULT_ACCOUNT_ID,
           enabled: false,
@@ -57,8 +57,8 @@ export const vkPlugin: ChannelPlugin<VkResolvedAccount> = {
           config: {
             accessToken: "",
             groupId: 0,
-            confirmationToken: "",
-            callbackPath: "/vk/callback",
+            apiVersion: "5.199",
+            longPollWait: 25,
           },
           groupId: 0,
         };
@@ -81,10 +81,10 @@ export const vkPlugin: ChannelPlugin<VkResolvedAccount> = {
 export function createAccountFromEnv(): VkAccountConfig | null {
   const accessToken = process.env.VK_ACCESS_TOKEN;
   const groupIdStr = process.env.VK_GROUP_ID;
-  const confirmationToken = process.env.VK_CONFIRMATION_TOKEN;
-  const callbackSecret = process.env.VK_CALLBACK_SECRET;
+  const waitStr = process.env.VK_LONGPOLL_WAIT;
+  const apiVersion = process.env.VK_API_VERSION || "5.199";
 
-  if (!accessToken || !groupIdStr || !confirmationToken) {
+  if (!accessToken || !groupIdStr) {
     return null;
   }
 
@@ -94,12 +94,18 @@ export function createAccountFromEnv(): VkAccountConfig | null {
     return null;
   }
 
+  const parsedWait = waitStr ? parseInt(waitStr, 10) : 25;
+  if (Number.isNaN(parsedWait)) {
+    console.error("[VK] Invalid VK_LONGPOLL_WAIT: must be a number from 1 to 25");
+    return null;
+  }
+  const longPollWait = Math.max(1, Math.min(25, parsedWait));
+
   return {
     accessToken,
     groupId,
-    confirmationToken,
-    callbackSecret: callbackSecret || undefined,
-    callbackPath: process.env.VK_CALLBACK_PATH || "/vk/callback",
+    apiVersion,
+    longPollWait,
     allowlistUserIds: parseAllowList(process.env.VK_ALLOWLIST_USER_IDS),
     allowlistChatIds: parseAllowList(process.env.VK_ALLOWLIST_CHAT_IDS),
   };

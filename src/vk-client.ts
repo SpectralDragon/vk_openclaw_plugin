@@ -10,8 +10,6 @@ export function getVkBot(config: VkAccountConfig): VkBotApi {
     bot = new VkBotApi({
       token: config.accessToken,
       group_id: config.groupId,
-      confirmation: config.confirmationToken,
-      secret: config.callbackSecret,
     });
     clients.set(key, bot);
   }

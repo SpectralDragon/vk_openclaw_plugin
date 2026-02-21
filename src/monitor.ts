@@ -1,9 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { OpenClawConfig, RuntimeEnv } from "openclaw/plugin-sdk";
-import { getVkRuntime } from "./runtime.js";
 import { createAccountFromEnv } from "./channel.js";
-import type { VkAccountConfig, VkInboundAttachment } from "./types.js";
 import { createVkReplyDispatcher } from "./reply-dispatcher.js";
+import { getVkRuntime } from "./runtime.js";
+import type { VkAccountConfig, VkInboundAttachment } from "./types.js";
+
+const supportedTypes = new Set(["message_new", "message_edit", "message_reply"]);
 
 export function getVkConfig(): VkAccountConfig | null {
   return createAccountFromEnv();
@@ -17,122 +19,70 @@ export async function handleVkWebhookRequest(
 
   if (urlStr.startsWith("/vk/health")) {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "ok", channel: "vk", timestamp: new Date().toISOString() }));
+    res.end(JSON.stringify({ status: "ok", channel: "vk", mode: "long-poll", timestamp: new Date().toISOString() }));
     return true;
   }
 
-  if (!urlStr.startsWith("/vk/callback")) {
-    return false;
+  if (urlStr.startsWith("/vk/callback")) {
+    res.writeHead(410, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("VK Callback API is disabled. Use Long Polling API.");
+    return true;
   }
 
-  try {
-    await handleRequest(req, res);
-    return true;
-  } catch (err) {
-    console.error("[VK] Webhook error:", err);
-    if (!res.headersSent) {
-      res.writeHead(500);
-      res.end("Internal Server Error");
-    }
-    return true;
-  }
+  return false;
 }
 
-async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const config = getVkConfig();
+export async function processVkUpdate(update: any, accountConfig?: VkAccountConfig): Promise<void> {
+  const config = accountConfig ?? getVkConfig();
   if (!config) {
-    res.writeHead(500);
-    res.end("VK not configured");
+    console.warn("[VK] Skipping inbound update: VK not configured");
     return;
   }
 
-  const body = await readJsonBody(req);
-  if (!body || typeof body !== "object") {
-    res.writeHead(400);
-    res.end("Bad Request");
+  if (!update || typeof update !== "object") {
     return;
   }
 
-  if (config.callbackSecret && body.secret && body.secret !== config.callbackSecret) {
-    res.writeHead(403);
-    res.end("Forbidden");
+  if (update.group_id && Number(update.group_id) !== config.groupId) {
     return;
   }
 
-  if (body.group_id && Number(body.group_id) !== config.groupId) {
-    res.writeHead(403);
-    res.end("Invalid group id");
+  if (update.type === "message_allow" || update.type === "message_deny") {
+    await handleAllowDenyUpdate(update);
     return;
   }
 
-  if (body.type === "confirmation") {
-    res.writeHead(200);
-    res.end(config.confirmationToken);
+  if (!supportedTypes.has(update.type)) {
     return;
   }
 
-  if (body.type === "message_allow" || body.type === "message_deny") {
-    const core = getVkRuntime();
-    const cfg = await loadConfigFromRuntime(core);
-    const runtime = createRuntimeFromCore(core);
-    const object = body.object || {};
-    const userId = Number(object.user_id || object.userId || object.user);
-    const eventLabel = body.type === "message_allow" ? "VK user allowed messages" : "VK user denied messages";
-    if (userId) {
-      const route = core.channel.routing.resolveAgentRoute({
-        cfg,
-        channel: "vk",
-        peer: { kind: "dm", id: String(userId) },
-      });
-      core.system.enqueueSystemEvent(`${eventLabel}: ${userId}`, {
-        sessionKey: route.sessionKey,
-        contextKey: `vk:${body.type}:${userId}:${Date.now()}`,
-      });
-    } else {
-      runtime.warn?.(`[VK] ${eventLabel} but user_id missing`);
-    }
-
-    res.writeHead(200);
-    res.end("ok");
-    return;
-  }
-
-  const supportedTypes = new Set(["message_new", "message_edit", "message_reply"]);
-  if (!supportedTypes.has(body.type)) {
-    res.writeHead(200);
-    res.end("ok");
-    return;
-  }
-
-  const message = body.object?.message || body.object?.reply_message || body.object?.reply;
+  const message = update.object?.message || update.object?.reply_message || update.object?.reply;
   if (!message) {
-    res.writeHead(200);
-    res.end("ok");
     return;
   }
 
   const peerId = Number(message.peer_id);
   const fromId = Number(message.from_id);
+  if (!Number.isFinite(peerId) || !Number.isFinite(fromId) || fromId <= 0) {
+    return;
+  }
+
   const chatId = peerId >= 2000000000 ? peerId - 2000000000 : undefined;
 
   if (!isAllowed(config, fromId, chatId)) {
-    res.writeHead(200);
-    res.end("ok");
     return;
   }
 
   const attachments = parseAttachments(message.attachments || []);
   const attachmentText = attachments.summary;
-  const eventPrefix = body.type === "message_edit"
+  const eventPrefix = update.type === "message_edit"
     ? "[edited] "
-    : body.type === "message_reply"
+    : update.type === "message_reply"
       ? "[reply] "
       : "";
   const content = [eventPrefix + (message.text || ""), attachmentText].filter(Boolean).join("\n").trim();
 
   if (!content) {
-    res.writeHead(200);
-    res.end("ok");
     return;
   }
 
@@ -158,17 +108,23 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       ? `VK message in chat ${chatId}`
       : `VK DM from ${fromId}`;
 
+    const contextMessageId = String(message.id || message.conversation_message_id || Date.now());
     core.system.enqueueSystemEvent(`${inboundLabel}: ${preview}`, {
       sessionKey: route.sessionKey,
-      contextKey: `vk:message:${message.conversation_message_id}`,
+      contextKey: `vk:message:${contextMessageId}`,
     });
+
+    const timestampSec = Number(message.date);
+    const timestampMs = Number.isFinite(timestampSec) && timestampSec > 0
+      ? timestampSec * 1000
+      : Date.now();
 
     const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(cfg);
     const envelopeFrom = isGroup ? `${chatId}:${fromId}` : String(fromId);
     const bodyText = core.channel.reply.formatAgentEnvelope({
       channel: "VK",
       from: envelopeFrom,
-      timestamp: new Date(message.date * 1000),
+      timestamp: new Date(timestampMs),
       envelope: envelopeOptions,
       body: `${fromId}: ${content}`,
     });
@@ -187,8 +143,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       SenderId: String(fromId),
       Provider: "vk" as const,
       Surface: "vk" as const,
-      MessageSid: String(message.id || message.conversation_message_id || Date.now()),
-      Timestamp: message.date * 1000,
+      MessageSid: contextMessageId,
+      Timestamp: timestampMs,
       WasMentioned: false,
       CommandAuthorized: true,
       OriginatingChannel: "vk" as const,
@@ -215,9 +171,30 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   } catch (err) {
     console.error("[VK] Dispatch failed:", err);
   }
+}
 
-  res.writeHead(200);
-  res.end("ok");
+async function handleAllowDenyUpdate(update: any): Promise<void> {
+  const core = getVkRuntime();
+  const cfg = await loadConfigFromRuntime(core);
+  const runtime = createRuntimeFromCore(core);
+  const object = update.object || {};
+  const userId = Number(object.user_id || object.userId || object.user);
+  const eventLabel = update.type === "message_allow" ? "VK user allowed messages" : "VK user denied messages";
+
+  if (userId) {
+    const route = core.channel.routing.resolveAgentRoute({
+      cfg,
+      channel: "vk",
+      peer: { kind: "dm", id: String(userId) },
+    });
+    core.system.enqueueSystemEvent(`${eventLabel}: ${userId}`, {
+      sessionKey: route.sessionKey,
+      contextKey: `vk:${update.type}:${userId}:${Date.now()}`,
+    });
+    return;
+  }
+
+  runtime.warn?.(`[VK] ${eventLabel} but user_id missing`);
 }
 
 function isAllowed(config: VkAccountConfig, fromId: number, chatId?: number): boolean {
@@ -298,22 +275,6 @@ function parseAttachments(attachments: any[]): { summary: string; media: VkInbou
     summary: labels.length ? labels.join(" ") : "",
     media,
   };
-}
-
-async function readJsonBody(req: IncomingMessage): Promise<any> {
-  const chunks: Buffer[] = [];
-  return new Promise((resolve, reject) => {
-    req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-    req.on("end", () => {
-      try {
-        const text = Buffer.concat(chunks).toString("utf8");
-        resolve(text ? JSON.parse(text) : {});
-      } catch (err) {
-        reject(err);
-      }
-    });
-    req.on("error", reject);
-  });
 }
 
 async function loadConfigFromRuntime(core: any): Promise<OpenClawConfig> {

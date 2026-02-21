@@ -1,9 +1,8 @@
 export type VkAccountConfig = {
   accessToken: string;
   groupId: number;
-  confirmationToken: string;
-  callbackSecret?: string;
-  callbackPath: string;
+  apiVersion: string;
+  longPollWait: number;
   allowlistUserIds?: number[];
   allowlistChatIds?: number[];
 };

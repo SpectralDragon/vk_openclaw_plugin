@@ -2,7 +2,7 @@
   "name": "vk-openclaw-plugin",
   "version": "0.1.0",
   "type": "module",
-  "description": "VK integration plugin for OpenClaw",
+  "description": "VK Long Polling integration plugin for OpenClaw",
   "author": "Vladislav Prusakov",
   "license": "MIT",
   "repository": {
@@ -28,7 +28,7 @@
       "detailLabel": "VK Bot",
       "docsPath": "/channels/vk",
       "docsLabel": "vk",
-      "blurb": "VK Callback API integration for OpenClaw.",
+      "blurb": "VK Long Polling API integration for OpenClaw.",
       "aliases": [
         "vkontakte",
         "вк",

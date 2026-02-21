@@ -1,7 +1,7 @@
 {
   "id": "vk-openclaw-plugin",
   "name": "VK Integration",
-  "description": "Connect OpenClaw AI agent to VK via Callback API",
+  "description": "Connect OpenClaw AI agent to VK via Long Polling API",
   "version": "0.1.0",
   "channels": [
     "vk-openclaw-plugin"
